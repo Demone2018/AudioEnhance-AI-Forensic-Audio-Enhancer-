@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Range input styling */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #22d3ee;
+  cursor: pointer;
+  margin-top: -6px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #22d3ee;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.3);
+}
+
+input[type='range']::-moz-range-track {
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+}
