@@ -23,22 +23,18 @@ import { t } from './i18n/translations';
 import type { Language } from './types/audio';
 
 function App() {
-  // Language
   const [lang, setLang] = useState<Language>(() => {
     const saved = localStorage.getItem('audioenhance_lang');
     return (saved as Language) || 'it';
   });
 
-  // Audio state
   const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
   const [originalData, setOriginalData] = useState<Float32Array | null>(null);
   const [fileName, setFileName] = useState('');
-  const [isPlaying, setIsPlaying] = useState(false);
   const [playingSource, setPlayingSource] = useState<'original' | 'processed' | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
 
-  // Hooks
   const processor = useAudioProcessor();
   const audioCtx = useAudioContext();
   const fileHistory = useFileHistory();
@@ -58,12 +54,10 @@ function App() {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
-  // Save language preference
   useEffect(() => {
     localStorage.setItem('audioenhance_lang', lang);
   }, [lang]);
 
-  // Handle file loaded
   const handleFileLoaded = useCallback(
     (audioBuffer: AudioBuffer, name: string, _rawBuffer: ArrayBuffer) => {
       setOriginalBuffer(audioBuffer);
@@ -71,11 +65,11 @@ function App() {
       setOriginalData(new Float32Array(channelData));
       setFileName(name);
       processor.resetResult();
+      audioCtx.resetTime();
     },
-    [processor]
+    [processor, audioCtx]
   );
 
-  // Handle AMR file
   const handleAmrDetected = useCallback(
     async (arrayBuffer: ArrayBuffer, name: string) => {
       try {
@@ -85,6 +79,7 @@ function App() {
         setOriginalData(new Float32Array(audioData));
         setFileName(name.replace(/\.amr$/i, '.wav'));
         processor.resetResult();
+        audioCtx.resetTime();
       } catch (err) {
         console.error('AMR conversion failed:', err);
       }
@@ -92,14 +87,12 @@ function App() {
     [processor, audioCtx]
   );
 
-  // Process audio
   const handleProcess = useCallback(async () => {
     if (!originalData || !originalBuffer) return;
 
     try {
       const result = await processor.processAudio(originalData, originalBuffer.sampleRate);
 
-      // Add to history
       const baseName = fileName.replace(/\.[^.]+$/, '');
       fileHistory.addEntry({
         fileName,
@@ -112,29 +105,23 @@ function App() {
     }
   }, [originalData, originalBuffer, processor, fileName, fileHistory]);
 
-  // Play original
   const handlePlayOriginal = useCallback(() => {
     if (!originalBuffer) return;
-    if (isPlaying) {
+    if (audioCtx.isPlaying && playingSource === 'original') {
       audioCtx.stopPlayback();
-      setIsPlaying(false);
       setPlayingSource(null);
       return;
     }
-    setIsPlaying(true);
     setPlayingSource('original');
     audioCtx.playRawBuffer(originalBuffer, () => {
-      setIsPlaying(false);
       setPlayingSource(null);
     });
-  }, [originalBuffer, isPlaying, audioCtx]);
+  }, [originalBuffer, audioCtx, playingSource]);
 
-  // Play processed (with Web Audio filter chain)
   const handlePlayProcessed = useCallback(() => {
     if (!processor.result) return;
-    if (isPlaying) {
+    if (audioCtx.isPlaying && playingSource === 'processed') {
       audioCtx.stopPlayback();
-      setIsPlaying(false);
       setPlayingSource(null);
       return;
     }
@@ -142,15 +129,46 @@ function App() {
       processor.result.processedBuffer,
       processor.result.sampleRate
     );
-    setIsPlaying(true);
     setPlayingSource('processed');
     audioCtx.playBuffer(buffer, processor.params, () => {
-      setIsPlaying(false);
       setPlayingSource(null);
     });
-  }, [processor.result, processor.params, isPlaying, audioCtx]);
+  }, [processor.result, processor.params, audioCtx, playingSource]);
 
-  // Download processed audio
+  // Seek handlers for waveforms
+  const handleSeekOriginal = useCallback(
+    (time: number) => {
+      if (!originalBuffer) return;
+      // If not playing original, start playing from this position
+      if (playingSource !== 'original') {
+        setPlayingSource('original');
+        audioCtx.playRawBuffer(originalBuffer, () => {
+          setPlayingSource(null);
+        });
+      }
+      audioCtx.seekTo(time);
+    },
+    [originalBuffer, audioCtx, playingSource]
+  );
+
+  const handleSeekProcessed = useCallback(
+    (time: number) => {
+      if (!processor.result) return;
+      const buffer = audioCtx.createBufferFromFloat32(
+        processor.result.processedBuffer,
+        processor.result.sampleRate
+      );
+      if (playingSource !== 'processed') {
+        setPlayingSource('processed');
+        audioCtx.playBuffer(buffer, processor.params, () => {
+          setPlayingSource(null);
+        });
+      }
+      audioCtx.seekTo(time);
+    },
+    [processor.result, processor.params, audioCtx, playingSource]
+  );
+
   const handleDownload = useCallback(async () => {
     if (!processor.result) return;
 
@@ -172,16 +190,20 @@ function App() {
     URL.revokeObjectURL(url);
   }, [processor, fileName]);
 
-  // Reset
   const handleReset = useCallback(() => {
     audioCtx.stopPlayback();
+    audioCtx.resetTime();
     setOriginalBuffer(null);
     setOriginalData(null);
     setFileName('');
-    setIsPlaying(false);
     setPlayingSource(null);
     processor.resetResult();
   }, [audioCtx, processor]);
+
+  const originalDuration = originalBuffer?.duration || 0;
+  const processedDuration = processor.result
+    ? processor.result.processedBuffer.length / processor.result.sampleRate
+    : 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -201,7 +223,6 @@ function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Language Toggle */}
             <button
               onClick={() => setLang((l) => (l === 'it' ? 'en' : 'it'))}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm transition-colors"
@@ -210,7 +231,6 @@ function App() {
               {lang.toUpperCase()}
             </button>
 
-            {/* Settings Toggle */}
             <button
               onClick={() => setShowSettings((s) => !s)}
               className={`p-2 rounded-lg transition-colors ${
@@ -225,9 +245,8 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Panel - Controls */}
+          {/* Left Panel */}
           <div className="lg:col-span-4 space-y-6">
-            {/* File Upload */}
             <AudioDropzone
               onFileLoaded={handleFileLoaded}
               onAmrDetected={handleAmrDetected}
@@ -236,7 +255,6 @@ function App() {
               disabled={processor.isProcessing}
             />
 
-            {/* Parameters */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4">
               <ParameterControls
                 params={processor.params}
@@ -246,7 +264,6 @@ function App() {
               />
             </div>
 
-            {/* Action Buttons */}
             <div className="space-y-2">
               <button
                 onClick={handleProcess}
@@ -266,7 +283,6 @@ function App() {
                 )}
               </button>
 
-              {/* Progress Bar */}
               <AnimatePresence>
                 {processor.isProcessing && (
                   <motion.div
@@ -290,7 +306,6 @@ function App() {
                 )}
               </AnimatePresence>
 
-              {/* Playback & Download */}
               {originalData && (
                 <div className="flex gap-2">
                   <button
@@ -341,9 +356,8 @@ function App() {
             </div>
           </div>
 
-          {/* Right Panel - Waveforms, Transcription, History */}
+          {/* Right Panel */}
           <div className="lg:col-span-8 space-y-6">
-            {/* Waveforms */}
             {originalData && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -353,8 +367,12 @@ function App() {
                 <WaveformCanvas
                   audioData={originalData}
                   sampleRate={originalBuffer?.sampleRate || 44100}
+                  qsjSegments={processor.result?.qsjSegments}
                   label={t('originalWaveform', lang)}
                   color="#22d3ee"
+                  currentTime={playingSource === 'original' ? audioCtx.currentTime : 0}
+                  duration={originalDuration}
+                  onSeek={handleSeekOriginal}
                 />
 
                 {processor.result && (
@@ -365,18 +383,23 @@ function App() {
                       qsjSegments={processor.result.qsjSegments}
                       label={t('processedWaveform', lang)}
                       color="#4ade80"
+                      currentTime={playingSource === 'processed' ? audioCtx.currentTime : 0}
+                      duration={processedDuration}
+                      onSeek={handleSeekProcessed}
                     />
                     {processor.result.qsjSegments.length > 0 && (
-                      <p className="text-xs text-red-400/60 italic">
-                        {t('qsjCutSegments', lang)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <div className="w-4 h-3 bg-red-500/25 border border-red-500/60 rounded-sm" />
+                        <p className="text-xs text-red-400/80">
+                          {t('qsjCutSegments', lang)}
+                        </p>
+                      </div>
                     )}
                   </>
                 )}
               </motion.div>
             )}
 
-            {/* Error */}
             {processor.error && (
               <div className="bg-red-900/20 border border-red-800/50 rounded-xl p-4">
                 <p className="text-sm text-red-400">
@@ -385,7 +408,6 @@ function App() {
               </div>
             )}
 
-            {/* Transcription */}
             {processor.result && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -403,7 +425,6 @@ function App() {
               </motion.div>
             )}
 
-            {/* History & Settings Panel */}
             <AnimatePresence>
               {showSettings && (
                 <motion.div
@@ -426,7 +447,6 @@ function App() {
               )}
             </AnimatePresence>
 
-            {/* Empty state */}
             {!originalData && (
               <div className="flex items-center justify-center h-64 text-slate-600">
                 <div className="text-center space-y-3">
@@ -439,10 +459,9 @@ function App() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-slate-800 mt-12 py-4">
         <p className="text-center text-xs text-slate-600">
-          AudioEnhance AI — Forensic Audio Enhancer — {t('language', lang)}: {lang.toUpperCase()}
+          AudioEnhance AI — Forensic Audio Enhancer — Claude AI — {t('language', lang)}: {lang.toUpperCase()}
         </p>
       </footer>
     </div>

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Sparkles, Download, Key, MessageSquare, Brain } from 'lucide-react';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import type { Language, TranscriptionResult } from '../types/audio';
 import { t } from '../i18n/translations';
 
-const API_KEY_STORAGE = 'chiave_api_gemini';
+const API_KEY_STORAGE = 'chiave_api_claude';
 
 interface TranscriptionPanelProps {
   processedAudioData: Float32Array | null;
@@ -71,7 +71,6 @@ export function TranscriptionPanel({
       offset += 2;
     }
 
-    // Convert to base64
     const bytes = new Uint8Array(buffer);
     let binary = '';
     for (let i = 0; i < bytes.length; i++) {
@@ -88,8 +87,10 @@ export function TranscriptionPanel({
     onTranscribing(true);
 
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const client = new Anthropic({
+        apiKey,
+        dangerouslyAllowBrowser: true,
+      });
 
       const audioBase64 = float32ToBase64Wav(processedAudioData, sampleRate);
 
@@ -110,17 +111,38 @@ Provide only the transcription, without additional comments.`
             ? 'Trascrivi questo audio in modo accurato. Indica i cambi di parlante se presenti. Fornisci solo la trascrizione.'
             : 'Accurately transcribe this audio. Indicate speaker changes if present. Provide only the transcription.';
 
-      const result = await model.generateContent([
-        { text: systemPrompt },
-        {
-          inlineData: {
-            mimeType: 'audio/wav',
-            data: audioBase64,
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: lang === 'it'
+                  ? 'Trascrivi il contenuto di questo file audio.'
+                  : 'Transcribe the content of this audio file.',
+              },
+              {
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: 'audio/wav' as 'application/pdf',
+                  data: audioBase64,
+                },
+              } as unknown as Anthropic.TextBlockParam,
+            ],
           },
-        },
-      ]);
+        ],
+      } as Anthropic.MessageCreateParamsNonStreaming);
 
-      const text = result.response.text();
+      const text = response.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n');
+
       setTranscription({
         text,
         mode,
@@ -143,6 +165,7 @@ File: ${originalFileName}
 Processing: ${filenameSuffix}
 Date: ${transcription.timestamp}
 Mode: ${transcription.mode}
+AI: Claude (Anthropic)
 ${'─'.repeat(60)}
 
 ${transcription.text}

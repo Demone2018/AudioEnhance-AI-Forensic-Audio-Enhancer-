@@ -47,7 +47,7 @@ const translations = {
 
   // Transcription
   transcription: { it: 'Trascrizione IA', en: 'AI Transcription' },
-  transcribeBtn: { it: 'Trascrivi con Gemini', en: 'Transcribe with Gemini' },
+  transcribeBtn: { it: 'Trascrivi con Claude AI', en: 'Transcribe with Claude AI' },
   transcribing: { it: 'Trascrizione in corso...', en: 'Transcribing...' },
   directMode: { it: 'Trascrizione Diretta', en: 'Direct Transcription' },
   predictiveMode: { it: 'Analisi Predittiva', en: 'Predictive Analysis' },
@@ -56,10 +56,10 @@ const translations = {
   noTranscription: { it: 'Nessuna trascrizione disponibile', en: 'No transcription available' },
 
   // API Key
-  apiKey: { it: 'Chiave API Gemini', en: 'Gemini API Key' },
-  apiKeyPlaceholder: { it: 'Inserisci la tua chiave API Gemini...', en: 'Enter your Gemini API key...' },
+  apiKey: { it: 'Chiave API Claude (Anthropic)', en: 'Claude API Key (Anthropic)' },
+  apiKeyPlaceholder: { it: 'Inserisci la tua chiave API Anthropic...', en: 'Enter your Anthropic API key...' },
   apiKeySaved: { it: 'Chiave salvata', en: 'Key saved' },
-  apiKeyRequired: { it: 'Chiave API Gemini richiesta per la trascrizione', en: 'Gemini API key required for transcription' },
+  apiKeyRequired: { it: 'Chiave API Anthropic richiesta per la trascrizione', en: 'Anthropic API key required for transcription' },
 
   // History
   fileHistory: { it: 'Storico File', en: 'File History' },

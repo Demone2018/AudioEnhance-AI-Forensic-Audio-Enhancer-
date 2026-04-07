@@ -1,11 +1,20 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import type { ProcessingParams } from '../types/audio';
 
-// Web Audio API filter chain for real-time playback with forensic filters
 export function useAudioContext() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const isPlayingRef = useRef(false);
+  const startTimeRef = useRef(0);     // AudioContext time when playback started
+  const offsetRef = useRef(0);         // offset into the buffer (for seek)
+  const currentBufferRef = useRef<AudioBuffer | null>(null);
+  const currentParamsRef = useRef<ProcessingParams | null>(null);
+  const currentModeRef = useRef<'raw' | 'filtered'>('raw');
+  const onEndedRef = useRef<(() => void) | undefined>(undefined);
+  const animFrameRef = useRef<number>(0);
+
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   const getContext = useCallback(() => {
     if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
@@ -14,14 +23,30 @@ export function useAudioContext() {
     return audioContextRef.current;
   }, []);
 
-  // Build the forensic filter chain using Web Audio API nodes
+  // Animation frame loop to update currentTime
+  const startTimeTracking = useCallback(() => {
+    const tick = () => {
+      if (isPlayingRef.current && audioContextRef.current) {
+        const elapsed = audioContextRef.current.currentTime - startTimeRef.current;
+        setCurrentTime(offsetRef.current + elapsed);
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+    };
+    animFrameRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const stopTimeTracking = useCallback(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+    }
+  }, []);
+
+  // Build the forensic filter chain
   const buildFilterChain = useCallback(
     (ctx: AudioContext, source: AudioBufferSourceNode, params: ProcessingParams): AudioNode => {
       let currentNode: AudioNode = source;
 
-      // Voice Isolation EQ
       if (params.enableEQ) {
-        // Highpass at 200Hz - cut low rumble
         const hp1 = ctx.createBiquadFilter();
         hp1.type = 'highpass';
         hp1.frequency.value = 200;
@@ -29,7 +54,6 @@ export function useAudioContext() {
         currentNode.connect(hp1);
         currentNode = hp1;
 
-        // Highpass at 300Hz - further isolation
         const hp2 = ctx.createBiquadFilter();
         hp2.type = 'highpass';
         hp2.frequency.value = 300;
@@ -37,7 +61,6 @@ export function useAudioContext() {
         currentNode.connect(hp2);
         currentNode = hp2;
 
-        // Lowpass at 4000Hz - cut high-frequency noise
         const lp = ctx.createBiquadFilter();
         lp.type = 'lowpass';
         lp.frequency.value = 4000;
@@ -46,7 +69,6 @@ export function useAudioContext() {
         currentNode = lp;
       }
 
-      // Hum removal - notch filters at 50Hz and 60Hz
       if (params.enableHumRemoval) {
         const notch50 = ctx.createBiquadFilter();
         notch50.type = 'notch';
@@ -63,7 +85,6 @@ export function useAudioContext() {
         currentNode = notch60;
       }
 
-      // Intelligibility boost - Peaking at 3500Hz
       if (params.trebleBoost > 0) {
         const peak = ctx.createBiquadFilter();
         peak.type = 'peaking';
@@ -74,7 +95,6 @@ export function useAudioContext() {
         currentNode = peak;
       }
 
-      // Voice Leveler (DynamicsCompressor + Gain)
       const compressor = ctx.createDynamicsCompressor();
       compressor.threshold.value = params.enableForensicBoost ? -100 : -50;
       compressor.knee.value = params.enableForensicBoost ? 0 : 10;
@@ -84,13 +104,11 @@ export function useAudioContext() {
       currentNode.connect(compressor);
       currentNode = compressor;
 
-      // Output gain
       const gainNode = ctx.createGain();
       gainNode.gain.value = Math.pow(10, params.gainDb / 20);
       currentNode.connect(gainNode);
       currentNode = gainNode;
 
-      // Peak limiter (second compressor)
       const limiter = ctx.createDynamicsCompressor();
       limiter.threshold.value = -1;
       limiter.knee.value = 0;
@@ -105,51 +123,6 @@ export function useAudioContext() {
     []
   );
 
-  const playBuffer = useCallback(
-    (audioBuffer: AudioBuffer, params: ProcessingParams, onEnded?: () => void) => {
-      stopPlayback();
-
-      const ctx = getContext();
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      sourceRef.current = source;
-      isPlayingRef.current = true;
-
-      const lastNode = buildFilterChain(ctx, source, params);
-      lastNode.connect(ctx.destination);
-
-      source.onended = () => {
-        isPlayingRef.current = false;
-        onEnded?.();
-      };
-
-      source.start(0);
-    },
-    [getContext, buildFilterChain]
-  );
-
-  const playRawBuffer = useCallback(
-    (audioBuffer: AudioBuffer, onEnded?: () => void) => {
-      stopPlayback();
-
-      const ctx = getContext();
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      sourceRef.current = source;
-      isPlayingRef.current = true;
-
-      source.connect(ctx.destination);
-
-      source.onended = () => {
-        isPlayingRef.current = false;
-        onEnded?.();
-      };
-
-      source.start(0);
-    },
-    [getContext]
-  );
-
   const stopPlayback = useCallback(() => {
     if (sourceRef.current && isPlayingRef.current) {
       try {
@@ -157,9 +130,88 @@ export function useAudioContext() {
       } catch {
         // Already stopped
       }
-      isPlayingRef.current = false;
     }
-  }, []);
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+    stopTimeTracking();
+  }, [stopTimeTracking]);
+
+  const _startSource = useCallback(
+    (audioBuffer: AudioBuffer, offset: number, mode: 'raw' | 'filtered', params?: ProcessingParams, onEnded?: () => void) => {
+      // Stop any existing playback
+      if (sourceRef.current && isPlayingRef.current) {
+        try { sourceRef.current.stop(); } catch { /* */ }
+      }
+      stopTimeTracking();
+
+      const ctx = getContext();
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      sourceRef.current = source;
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      currentBufferRef.current = audioBuffer;
+      currentParamsRef.current = params || null;
+      currentModeRef.current = mode;
+      onEndedRef.current = onEnded;
+      offsetRef.current = offset;
+      startTimeRef.current = ctx.currentTime;
+
+      if (mode === 'filtered' && params) {
+        const lastNode = buildFilterChain(ctx, source, params);
+        lastNode.connect(ctx.destination);
+      } else {
+        source.connect(ctx.destination);
+      }
+
+      source.onended = () => {
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        stopTimeTracking();
+        onEnded?.();
+      };
+
+      source.start(0, offset);
+      startTimeTracking();
+    },
+    [getContext, buildFilterChain, startTimeTracking, stopTimeTracking]
+  );
+
+  const playBuffer = useCallback(
+    (audioBuffer: AudioBuffer, params: ProcessingParams, onEnded?: () => void) => {
+      stopPlayback();
+      _startSource(audioBuffer, 0, 'filtered', params, onEnded);
+    },
+    [stopPlayback, _startSource]
+  );
+
+  const playRawBuffer = useCallback(
+    (audioBuffer: AudioBuffer, onEnded?: () => void) => {
+      stopPlayback();
+      _startSource(audioBuffer, 0, 'raw', undefined, onEnded);
+    },
+    [stopPlayback, _startSource]
+  );
+
+  // Seek to a specific time in the currently playing buffer
+  const seekTo = useCallback(
+    (time: number) => {
+      const buffer = currentBufferRef.current;
+      if (!buffer) return;
+
+      const clampedTime = Math.max(0, Math.min(time, buffer.duration));
+      setCurrentTime(clampedTime);
+
+      if (isPlayingRef.current) {
+        // Restart playback from the new position
+        _startSource(buffer, clampedTime, currentModeRef.current, currentParamsRef.current || undefined, onEndedRef.current);
+      } else {
+        // Just update the cursor position without playing
+        offsetRef.current = clampedTime;
+      }
+    },
+    [_startSource]
+  );
 
   const decodeAudioData = useCallback(
     async (arrayBuffer: ArrayBuffer): Promise<AudioBuffer> => {
@@ -180,12 +232,27 @@ export function useAudioContext() {
     [getContext]
   );
 
+  const resetTime = useCallback(() => {
+    setCurrentTime(0);
+    offsetRef.current = 0;
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopTimeTracking();
+    };
+  }, [stopTimeTracking]);
+
   return {
     playBuffer,
     playRawBuffer,
     stopPlayback,
+    seekTo,
     decodeAudioData,
     createBufferFromFloat32,
-    isPlaying: isPlayingRef,
+    isPlaying,
+    currentTime,
+    resetTime,
   };
 }
