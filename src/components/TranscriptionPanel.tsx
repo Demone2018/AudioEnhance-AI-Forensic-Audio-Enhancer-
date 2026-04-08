@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Sparkles, Download, Key, MessageSquare, Brain } from 'lucide-react';
-import Anthropic from '@anthropic-ai/sdk';
 import type { Language, TranscriptionResult } from '../types/audio';
 import { t } from '../i18n/translations';
 
@@ -87,11 +86,6 @@ export function TranscriptionPanel({
     onTranscribing(true);
 
     try {
-      const client = new Anthropic({
-        apiKey,
-        dangerouslyAllowBrowser: true,
-      });
-
       const audioBase64 = float32ToBase64Wav(processedAudioData, sampleRate);
 
       const systemPrompt =
@@ -111,36 +105,52 @@ Provide only the transcription, without additional comments.`
             ? 'Trascrivi questo audio in modo accurato. Indica i cambi di parlante se presenti. Fornisci solo la trascrizione.'
             : 'Accurately transcribe this audio. Indicate speaker changes if present. Provide only the transcription.';
 
-      const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: lang === 'it'
-                  ? 'Trascrivi il contenuto di questo file audio.'
-                  : 'Transcribe the content of this audio file.',
-              },
-              {
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: 'audio/wav' as 'application/pdf',
-                  data: audioBase64,
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: lang === 'it'
+                    ? 'Trascrivi il contenuto di questo file audio.'
+                    : 'Transcribe the content of this audio file.',
                 },
-              } as unknown as Anthropic.TextBlockParam,
-            ],
-          },
-        ],
-      } as Anthropic.MessageCreateParamsNonStreaming);
+                {
+                  type: 'document',
+                  source: {
+                    type: 'base64',
+                    media_type: 'audio/wav',
+                    data: audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      });
 
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const text = data.content
+        .filter((block: any) => block.type === 'text')
+        .map((block: any) => block.text)
         .join('\n');
 
       setTranscription({

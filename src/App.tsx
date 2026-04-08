@@ -31,13 +31,16 @@ function App() {
   const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
   const [originalData, setOriginalData] = useState<Float32Array | null>(null);
   const [fileName, setFileName] = useState('');
-  const [playingSource, setPlayingSource] = useState<'original' | 'processed' | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [processedBuffer, setProcessedBuffer] = useState<AudioBuffer | null>(null);
 
   const processor = useAudioProcessor();
   const audioCtx = useAudioContext();
   const fileHistory = useFileHistory();
+
+  // playingSource comes from the audio context hook now
+  const { playingSource } = audioCtx;
 
   // Navigation protection
   const isBusy = processor.isProcessing || isTranscribing;
@@ -105,84 +108,52 @@ function App() {
     }
   }, [originalData, originalBuffer, processor, fileName, fileHistory]);
 
+  // Build processedBuffer when result changes
+  useEffect(() => {
+    if (processor.result) {
+      const buf = audioCtx.createBufferFromFloat32(
+        processor.result.processedBuffer,
+        processor.result.sampleRate
+      );
+      setProcessedBuffer(buf);
+    } else {
+      setProcessedBuffer(null);
+    }
+  }, [processor.result, audioCtx]);
+
   const handlePlayOriginal = useCallback(() => {
     if (!originalBuffer) return;
-    // If anything is playing, stop it first
-    if (audioCtx.isPlaying) {
+    if (playingSource === 'original') {
       audioCtx.stopPlayback();
-      // If we were playing original, just stop (toggle off)
-      if (playingSource === 'original') {
-        setPlayingSource(null);
-        return;
-      }
+      return;
     }
-    setPlayingSource('original');
-    audioCtx.playRawBuffer(originalBuffer, () => {
-      setPlayingSource(null);
-    });
+    audioCtx.playRawBuffer(originalBuffer);
   }, [originalBuffer, audioCtx, playingSource]);
 
   const handlePlayProcessed = useCallback(() => {
-    if (!processor.result) return;
-    // If anything is playing, stop it first
-    if (audioCtx.isPlaying) {
+    if (!processedBuffer) return;
+    if (playingSource === 'processed') {
       audioCtx.stopPlayback();
-      // If we were playing processed, just stop (toggle off)
-      if (playingSource === 'processed') {
-        setPlayingSource(null);
-        return;
-      }
+      return;
     }
-    const buffer = audioCtx.createBufferFromFloat32(
-      processor.result.processedBuffer,
-      processor.result.sampleRate
-    );
-    setPlayingSource('processed');
-    audioCtx.playBuffer(buffer, processor.params, () => {
-      setPlayingSource(null);
-    });
-  }, [processor.result, processor.params, audioCtx, playingSource]);
+    audioCtx.playBuffer(processedBuffer, processor.params);
+  }, [processedBuffer, processor.params, audioCtx, playingSource]);
 
-  // Seek handlers for waveforms - seek within currently playing source
+  // Seek on waveform click: start playing from that position
   const handleSeekOriginal = useCallback(
     (time: number) => {
       if (!originalBuffer) return;
-      if (playingSource === 'original' && audioCtx.isPlaying) {
-        // Already playing original: just seek to position
-        audioCtx.seekTo(time);
-      } else {
-        // Not playing or playing something else: start original from this point
-        audioCtx.stopPlayback();
-        setPlayingSource('original');
-        audioCtx.playRawBuffer(originalBuffer, () => {
-          setPlayingSource(null);
-        });
-        // Small delay to let playback start, then seek
-        setTimeout(() => audioCtx.seekTo(time), 50);
-      }
+      audioCtx.playRawFrom(originalBuffer, time);
     },
-    [originalBuffer, audioCtx, playingSource]
+    [originalBuffer, audioCtx]
   );
 
   const handleSeekProcessed = useCallback(
     (time: number) => {
-      if (!processor.result) return;
-      if (playingSource === 'processed' && audioCtx.isPlaying) {
-        audioCtx.seekTo(time);
-      } else {
-        audioCtx.stopPlayback();
-        const buffer = audioCtx.createBufferFromFloat32(
-          processor.result.processedBuffer,
-          processor.result.sampleRate
-        );
-        setPlayingSource('processed');
-        audioCtx.playBuffer(buffer, processor.params, () => {
-          setPlayingSource(null);
-        });
-        setTimeout(() => audioCtx.seekTo(time), 50);
-      }
+      if (!processedBuffer) return;
+      audioCtx.playFilteredFrom(processedBuffer, processor.params, time);
     },
-    [processor.result, processor.params, audioCtx, playingSource]
+    [processedBuffer, processor.params, audioCtx]
   );
 
   const handleDownload = useCallback(async () => {
@@ -211,8 +182,8 @@ function App() {
     audioCtx.resetTime();
     setOriginalBuffer(null);
     setOriginalData(null);
+    setProcessedBuffer(null);
     setFileName('');
-    setPlayingSource(null);
     processor.resetResult();
   }, [audioCtx, processor]);
 
