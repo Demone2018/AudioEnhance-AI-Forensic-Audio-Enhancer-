@@ -3,7 +3,7 @@ import { Sparkles, Download, Key, MessageSquare, Brain } from 'lucide-react';
 import type { Language, TranscriptionResult } from '../types/audio';
 import { t } from '../i18n/translations';
 
-const API_KEY_STORAGE = 'chiave_api_claude';
+const API_KEY_STORAGE = 'chiave_api_openai';
 
 interface TranscriptionPanelProps {
   processedAudioData: Float32Array | null;
@@ -12,6 +12,42 @@ interface TranscriptionPanelProps {
   originalFileName: string;
   lang: Language;
   onTranscribing: (v: boolean) => void;
+}
+
+function float32ToWavBlob(data: Float32Array, sr: number): Blob {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const bytesPerSample = bitsPerSample / 8;
+  const dataSize = data.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const w = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+  w(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  w(8, 'WAVE');
+  w(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sr, true);
+  view.setUint32(28, sr * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, bitsPerSample, true);
+  w(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < data.length; i++) {
+    const sample = Math.max(-1, Math.min(1, data[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: 'audio/wav' });
 }
 
 export function TranscriptionPanel({
@@ -35,49 +71,6 @@ export function TranscriptionPanel({
     if (key) setShowApiKey(false);
   };
 
-  const float32ToBase64Wav = (data: Float32Array, sr: number): string => {
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const bytesPerSample = bitsPerSample / 8;
-    const dataSize = data.length * bytesPerSample;
-    const headerSize = 44;
-    const buffer = new ArrayBuffer(headerSize + dataSize);
-    const view = new DataView(buffer);
-
-    const writeStr = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sr, true);
-    view.setUint32(28, sr * numChannels * bytesPerSample, true);
-    view.setUint16(32, numChannels * bytesPerSample, true);
-    view.setUint16(34, bitsPerSample, true);
-    writeStr(36, 'data');
-    view.setUint32(40, dataSize, true);
-
-    let offset = 44;
-    for (let i = 0; i < data.length; i++) {
-      let sample = Math.max(-1, Math.min(1, data[i]));
-      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-      view.setInt16(offset, intSample, true);
-      offset += 2;
-    }
-
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  };
-
   const transcribe = async () => {
     if (!apiKey || !processedAudioData) return;
 
@@ -86,87 +79,90 @@ export function TranscriptionPanel({
     onTranscribing(true);
 
     try {
-      // Check audio size (max ~25MB base64 for API)
-      const audioSizeBytes = processedAudioData.length * 2; // 16-bit PCM
-      if (audioSizeBytes > 20 * 1024 * 1024) {
+      // Step 1: Transcribe with Whisper
+      const wavBlob = float32ToWavBlob(processedAudioData, sampleRate);
+
+      // Check size (Whisper limit: 25MB)
+      if (wavBlob.size > 25 * 1024 * 1024) {
         throw new Error(lang === 'it'
-          ? 'Audio troppo lungo per la trascrizione. Prova a ridurre la durata.'
-          : 'Audio too long for transcription. Try reducing the duration.');
+          ? 'Audio troppo lungo (max 25MB). Prova con un file più corto.'
+          : 'Audio too long (max 25MB). Try a shorter file.');
       }
 
-      const audioBase64 = float32ToBase64Wav(processedAudioData, sampleRate);
+      const formData = new FormData();
+      formData.append('file', wavBlob, 'audio.wav');
+      formData.append('model', 'whisper-1');
+      formData.append('language', lang === 'it' ? 'it' : 'en');
+      formData.append('response_format', 'verbose_json');
 
-      const systemPrompt =
-        mode === 'predictive'
-          ? lang === 'it'
-            ? `Sei un perito fonico forense esperto. Trascrivi questo audio migliorato con la massima precisione possibile.
-Quando incontri parole incomprensibili o mascherate dal rumore, usa il contesto semantico per dedurre la parola più probabile e segnalala con il tag [probabile: parola].
-Se una parola è completamente incomprensibile, usa [incomprensibile].
-Indica anche i cambi di parlante con [Parlante 1], [Parlante 2], etc.
-Fornisci solo la trascrizione, senza commenti aggiuntivi.`
-            : `You are an expert forensic audio examiner. Transcribe this enhanced audio with maximum accuracy.
-When you encounter words that are incomprehensible or masked by noise, use semantic context to infer the most likely word and mark it with the tag [probable: word].
-If a word is completely incomprehensible, use [incomprehensible].
-Also indicate speaker changes with [Speaker 1], [Speaker 2], etc.
-Provide only the transcription, without additional comments.`
-          : lang === 'it'
-            ? 'Trascrivi questo audio in modo accurato. Indica i cambi di parlante se presenti. Fornisci solo la trascrizione.'
-            : 'Accurately transcribe this audio. Indicate speaker changes if present. Provide only the transcription.';
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2025-01-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 8192,
-          system: systemPrompt,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'document',
-                  source: {
-                    type: 'base64',
-                    media_type: 'audio/wav',
-                    data: audioBase64,
-                  },
-                },
-                {
-                  type: 'text',
-                  text: lang === 'it'
-                    ? 'Trascrivi il contenuto di questo file audio.'
-                    : 'Transcribe the content of this audio file.',
-                },
-              ],
-            },
-          ],
-        }),
+        body: formData,
       });
 
-      if (!response.ok) {
-        let errMsg = `API error: ${response.status}`;
+      if (!whisperResponse.ok) {
+        let errMsg = `Whisper API error: ${whisperResponse.status}`;
         try {
-          const errorData = await response.json();
-          errMsg = errorData.error?.message || errMsg;
+          const errData = await whisperResponse.json();
+          errMsg = errData.error?.message || errMsg;
         } catch { /* */ }
         throw new Error(errMsg);
       }
 
-      const data = await response.json();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const text = data.content
-        .filter((block: any) => block.type === 'text')
-        .map((block: any) => block.text)
-        .join('\n');
+      const whisperData = await whisperResponse.json();
+      let transcriptText = whisperData.text || '';
+
+      // Step 2: If predictive mode, enhance with GPT-4o
+      if (mode === 'predictive' && transcriptText) {
+        const systemPrompt = lang === 'it'
+          ? `Sei un perito fonico forense esperto. Ti viene data una trascrizione automatica di un audio di bassa qualità, probabilmente un'intercettazione o registrazione ambientale.
+
+Il tuo compito è:
+1. Analizzare la trascrizione e usare il contesto semantico per migliorarla
+2. Dove la trascrizione ha parole che sembrano errate o senza senso, deduci la parola più probabile e segnalala con [probabile: parola]
+3. Dove mancano chiaramente parole, inseriscile con [dedotto: parola]
+4. Segna le parti davvero incomprensibili con [incomprensibile]
+5. Indica i cambi di parlante con [Parlante 1], [Parlante 2], etc.
+
+Restituisci SOLO la trascrizione migliorata, senza commenti.`
+          : `You are an expert forensic audio examiner. You are given an automatic transcription of a low-quality audio, likely a surveillance or environmental recording.
+
+Your task is:
+1. Analyze the transcription and use semantic context to improve it
+2. Where the transcription has words that seem wrong or nonsensical, infer the most likely word and mark it with [probable: word]
+3. Where words are clearly missing, insert them with [inferred: word]
+4. Mark truly incomprehensible parts with [incomprehensible]
+5. Indicate speaker changes with [Speaker 1], [Speaker 2], etc.
+
+Return ONLY the improved transcription, without comments.`;
+
+        const gptResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `Trascrizione automatica da migliorare:\n\n${transcriptText}` },
+            ],
+            max_tokens: 4096,
+          }),
+        });
+
+        if (gptResponse.ok) {
+          const gptData = await gptResponse.json();
+          transcriptText = gptData.choices?.[0]?.message?.content || transcriptText;
+        }
+      }
 
       setTranscription({
-        text,
+        text: transcriptText,
         mode,
         timestamp: new Date().toISOString(),
       });
@@ -182,12 +178,11 @@ Provide only the transcription, without additional comments.`
     if (!transcription) return;
     const baseName = originalFileName.replace(/\.[^.]+$/, '');
     const fileName = `${baseName}${filenameSuffix}_${mode === 'predictive' ? 'PRED' : 'DIR'}_transcript.txt`;
-    const content = `AudioEnhance AI - ${mode === 'predictive' ? 'Predictive Analysis' : 'Direct Transcription'}
+    const content = `AudioEnhance AI - ${mode === 'predictive' ? 'Predictive Analysis (Whisper + GPT-4o)' : 'Direct Transcription (Whisper)'}
 File: ${originalFileName}
 Processing: ${filenameSuffix}
 Date: ${transcription.timestamp}
 Mode: ${transcription.mode}
-AI: Claude (Anthropic)
 ${'─'.repeat(60)}
 
 ${transcription.text}

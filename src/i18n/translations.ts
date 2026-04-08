@@ -47,19 +47,19 @@ const translations = {
 
   // Transcription
   transcription: { it: 'Trascrizione IA', en: 'AI Transcription' },
-  transcribeBtn: { it: 'Trascrivi con Claude AI', en: 'Transcribe with Claude AI' },
+  transcribeBtn: { it: 'Trascrivi Audio', en: 'Transcribe Audio' },
   transcribing: { it: 'Trascrizione in corso...', en: 'Transcribing...' },
   directMode: { it: 'Trascrizione Diretta', en: 'Direct Transcription' },
   predictiveMode: { it: 'Analisi Predittiva', en: 'Predictive Analysis' },
-  predictiveDesc: { it: 'L\'IA agisce come perito fonico, deducendo parole incomprensibili', en: 'AI acts as forensic expert, inferring incomprehensible words' },
+  predictiveDesc: { it: 'Whisper trascrive, poi GPT-4o analizza come perito fonico deducendo le parole incomprensibili', en: 'Whisper transcribes, then GPT-4o analyzes as forensic expert inferring incomprehensible words' },
   downloadTranscript: { it: 'Scarica Trascrizione', en: 'Download Transcript' },
   noTranscription: { it: 'Nessuna trascrizione disponibile', en: 'No transcription available' },
 
   // API Key
-  apiKey: { it: 'Chiave API Claude (Anthropic)', en: 'Claude API Key (Anthropic)' },
-  apiKeyPlaceholder: { it: 'Inserisci la tua chiave API Anthropic...', en: 'Enter your Anthropic API key...' },
+  apiKey: { it: 'Chiave API OpenAI', en: 'OpenAI API Key' },
+  apiKeyPlaceholder: { it: 'Inserisci la tua chiave API OpenAI (sk-...)...', en: 'Enter your OpenAI API key (sk-...)...' },
   apiKeySaved: { it: 'Chiave salvata', en: 'Key saved' },
-  apiKeyRequired: { it: 'Chiave API Anthropic richiesta per la trascrizione', en: 'Anthropic API key required for transcription' },
+  apiKeyRequired: { it: 'Chiave API OpenAI richiesta per la trascrizione', en: 'OpenAI API key required for transcription' },
 
   // History
   fileHistory: { it: 'Storico File', en: 'File History' },
