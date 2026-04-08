@@ -86,6 +86,14 @@ export function TranscriptionPanel({
     onTranscribing(true);
 
     try {
+      // Check audio size (max ~25MB base64 for API)
+      const audioSizeBytes = processedAudioData.length * 2; // 16-bit PCM
+      if (audioSizeBytes > 20 * 1024 * 1024) {
+        throw new Error(lang === 'it'
+          ? 'Audio troppo lungo per la trascrizione. Prova a ridurre la durata.'
+          : 'Audio too long for transcription. Try reducing the duration.');
+      }
+
       const audioBase64 = float32ToBase64Wav(processedAudioData, sampleRate);
 
       const systemPrompt =
@@ -110,7 +118,7 @@ Provide only the transcription, without additional comments.`
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
+          'anthropic-version': '2025-01-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
@@ -122,18 +130,18 @@ Provide only the transcription, without additional comments.`
               role: 'user',
               content: [
                 {
-                  type: 'text',
-                  text: lang === 'it'
-                    ? 'Trascrivi il contenuto di questo file audio.'
-                    : 'Transcribe the content of this audio file.',
-                },
-                {
                   type: 'document',
                   source: {
                     type: 'base64',
                     media_type: 'audio/wav',
                     data: audioBase64,
                   },
+                },
+                {
+                  type: 'text',
+                  text: lang === 'it'
+                    ? 'Trascrivi il contenuto di questo file audio.'
+                    : 'Transcribe the content of this audio file.',
                 },
               ],
             },
@@ -142,8 +150,12 @@ Provide only the transcription, without additional comments.`
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+        let errMsg = `API error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errMsg = errorData.error?.message || errMsg;
+        } catch { /* */ }
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
