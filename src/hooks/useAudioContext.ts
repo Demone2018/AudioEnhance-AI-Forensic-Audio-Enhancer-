@@ -96,9 +96,9 @@ export function useAudioContext() {
       }
 
       const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = params.enableForensicBoost ? -100 : -50;
-      compressor.knee.value = params.enableForensicBoost ? 0 : 10;
-      compressor.ratio.value = params.enableForensicBoost ? 20 : 12;
+      compressor.threshold.value = params.enableForensicBoost ? -60 : -24;
+      compressor.knee.value = params.enableForensicBoost ? 5 : 10;
+      compressor.ratio.value = params.enableForensicBoost ? 12 : 4;
       compressor.attack.value = 0.003;
       compressor.release.value = 0.25;
       currentNode.connect(compressor);
@@ -124,16 +124,17 @@ export function useAudioContext() {
   );
 
   const stopPlayback = useCallback(() => {
-    if (sourceRef.current && isPlayingRef.current) {
+    stopTimeTracking();
+    if (sourceRef.current) {
       try {
         sourceRef.current.stop();
       } catch {
         // Already stopped
       }
+      sourceRef.current = null;
     }
     isPlayingRef.current = false;
     setIsPlaying(false);
-    stopTimeTracking();
   }, [stopTimeTracking]);
 
   const _startSource = useCallback(

@@ -60,78 +60,66 @@ function applyQSJ(
 // Tracks noise floor via envelope follower per band, applies downward expansion.
 function applyNoiseReduction(data: Float32Array, _sampleRate: number): Float32Array {
   const output = new Float32Array(data.length);
+  const windowSum = new Float32Array(data.length); // Track window overlap normalization
 
-  // Define 4 frequency bands (simple biquad-style processing)
-  const bands = [
-    { low: 0, high: 300 },
-    { low: 300, high: 1000 },
-    { low: 1000, high: 3000 },
-    { low: 3000, high: 8000 },
-  ];
-
-  // Simple FFT-based band processing using overlapping frames
   const frameSize = 2048;
-  const hopSize = frameSize / 2;
-  const numFrames = Math.ceil(data.length / hopSize);
+  const hopSize = frameSize / 4; // 75% overlap for smooth crossfade
+  const numFrames = Math.ceil((data.length - frameSize) / hopSize) + 1;
 
-  // Noise floor trackers per band
-  const noiseFloor = new Float32Array(bands.length).fill(0.001);
-  const attackCoeff = 0.01;
-  const releaseCoeff = 0.0001;
-  const expansionRatio = 3.0;
+  // Noise floor tracker
+  let noiseFloor = 0.001;
+  const attackCoeff = 0.02;
+  const releaseCoeff = 0.0005;
+  const expansionRatio = 2.0;
 
-  // Process in time domain with band approximation
+  // Pre-compute Hann window
+  const hannWindow = new Float32Array(frameSize);
+  for (let i = 0; i < frameSize; i++) {
+    hannWindow[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / frameSize));
+  }
+
   for (let frame = 0; frame < numFrames; frame++) {
     const start = frame * hopSize;
     const end = Math.min(start + frameSize, data.length);
+    const len = end - start;
 
     // Compute RMS energy for this frame
     let energy = 0;
-    let count = 0;
     for (let i = start; i < end; i++) {
       energy += data[i] * data[i];
-      count++;
     }
-    const rms = Math.sqrt(energy / (count || 1));
+    const rms = Math.sqrt(energy / len);
 
-    // Update noise floor estimate (simple envelope follower)
-    for (let b = 0; b < bands.length; b++) {
-      if (rms < noiseFloor[b]) {
-        noiseFloor[b] = noiseFloor[b] * (1 - attackCoeff) + rms * attackCoeff;
-      } else {
-        noiseFloor[b] = noiseFloor[b] * (1 - releaseCoeff) + rms * releaseCoeff;
-      }
+    // Update noise floor estimate (envelope follower)
+    if (rms < noiseFloor) {
+      noiseFloor = noiseFloor * (1 - attackCoeff) + rms * attackCoeff;
+    } else {
+      noiseFloor = noiseFloor * (1 - releaseCoeff) + rms * releaseCoeff;
     }
 
-    // Compute average suppression factor
-    const avgNoiseFloor = noiseFloor.reduce((a, b) => a + b, 0) / noiseFloor.length;
+    // Compute suppression gain
     let gain = 1.0;
-    if (rms < avgNoiseFloor * 2) {
-      // Downward expansion: reduce signal that is close to noise floor
-      const ratio = rms / (avgNoiseFloor * 2 + 1e-10);
+    const threshold = noiseFloor * 3;
+    if (rms < threshold) {
+      const ratio = rms / (threshold + 1e-10);
       gain = Math.pow(ratio, expansionRatio - 1);
-      gain = Math.max(gain, 0.01); // Don't fully silence
+      gain = Math.max(gain, 0.05); // Don't fully silence
     }
 
-    // Apply gain with crossfade in overlap region
-    for (let i = start; i < end; i++) {
-      const windowPos = (i - start) / frameSize;
-      // Hann window for smooth transitions
-      const window = 0.5 * (1 - Math.cos(2 * Math.PI * windowPos));
-      output[i] += data[i] * gain * window;
+    // Apply windowed gain with proper overlap-add
+    for (let i = 0; i < len; i++) {
+      const w = hannWindow[i] || 0;
+      output[start + i] += data[start + i] * gain * w;
+      windowSum[start + i] += w;
     }
   }
 
-  // Normalize to prevent clipping
-  let maxVal = 0;
+  // Normalize by window sum to maintain unity gain
   for (let i = 0; i < output.length; i++) {
-    const abs = Math.abs(output[i]);
-    if (abs > maxVal) maxVal = abs;
-  }
-  if (maxVal > 0.99) {
-    const normFactor = 0.99 / maxVal;
-    for (let i = 0; i < output.length; i++) {
-      output[i] *= normFactor;
+    if (windowSum[i] > 0.001) {
+      output[i] /= windowSum[i];
+    } else {
+      output[i] = data[i]; // Fallback to original
     }
   }
 

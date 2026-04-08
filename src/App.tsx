@@ -107,10 +107,14 @@ function App() {
 
   const handlePlayOriginal = useCallback(() => {
     if (!originalBuffer) return;
-    if (audioCtx.isPlaying && playingSource === 'original') {
+    // If anything is playing, stop it first
+    if (audioCtx.isPlaying) {
       audioCtx.stopPlayback();
-      setPlayingSource(null);
-      return;
+      // If we were playing original, just stop (toggle off)
+      if (playingSource === 'original') {
+        setPlayingSource(null);
+        return;
+      }
     }
     setPlayingSource('original');
     audioCtx.playRawBuffer(originalBuffer, () => {
@@ -120,10 +124,14 @@ function App() {
 
   const handlePlayProcessed = useCallback(() => {
     if (!processor.result) return;
-    if (audioCtx.isPlaying && playingSource === 'processed') {
+    // If anything is playing, stop it first
+    if (audioCtx.isPlaying) {
       audioCtx.stopPlayback();
-      setPlayingSource(null);
-      return;
+      // If we were playing processed, just stop (toggle off)
+      if (playingSource === 'processed') {
+        setPlayingSource(null);
+        return;
+      }
     }
     const buffer = audioCtx.createBufferFromFloat32(
       processor.result.processedBuffer,
@@ -135,18 +143,23 @@ function App() {
     });
   }, [processor.result, processor.params, audioCtx, playingSource]);
 
-  // Seek handlers for waveforms
+  // Seek handlers for waveforms - seek within currently playing source
   const handleSeekOriginal = useCallback(
     (time: number) => {
       if (!originalBuffer) return;
-      // If not playing original, start playing from this position
-      if (playingSource !== 'original') {
+      if (playingSource === 'original' && audioCtx.isPlaying) {
+        // Already playing original: just seek to position
+        audioCtx.seekTo(time);
+      } else {
+        // Not playing or playing something else: start original from this point
+        audioCtx.stopPlayback();
         setPlayingSource('original');
         audioCtx.playRawBuffer(originalBuffer, () => {
           setPlayingSource(null);
         });
+        // Small delay to let playback start, then seek
+        setTimeout(() => audioCtx.seekTo(time), 50);
       }
-      audioCtx.seekTo(time);
     },
     [originalBuffer, audioCtx, playingSource]
   );
@@ -154,17 +167,20 @@ function App() {
   const handleSeekProcessed = useCallback(
     (time: number) => {
       if (!processor.result) return;
-      const buffer = audioCtx.createBufferFromFloat32(
-        processor.result.processedBuffer,
-        processor.result.sampleRate
-      );
-      if (playingSource !== 'processed') {
+      if (playingSource === 'processed' && audioCtx.isPlaying) {
+        audioCtx.seekTo(time);
+      } else {
+        audioCtx.stopPlayback();
+        const buffer = audioCtx.createBufferFromFloat32(
+          processor.result.processedBuffer,
+          processor.result.sampleRate
+        );
         setPlayingSource('processed');
         audioCtx.playBuffer(buffer, processor.params, () => {
           setPlayingSource(null);
         });
+        setTimeout(() => audioCtx.seekTo(time), 50);
       }
-      audioCtx.seekTo(time);
     },
     [processor.result, processor.params, audioCtx, playingSource]
   );

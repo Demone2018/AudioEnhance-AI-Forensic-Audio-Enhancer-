@@ -3,12 +3,12 @@ import type { ProcessingParams, ProcessingResult, WorkerResponse } from '../type
 
 const DEFAULT_PARAMS: ProcessingParams = {
   sensitivity: 50,
-  gainDb: 12,
-  trebleBoost: 6,
-  enableEQ: true,
+  gainDb: 3,
+  trebleBoost: 3,
+  enableEQ: false,
   enableQSJ: false,
   enableForensicBoost: false,
-  enableNoiseReduction: true,
+  enableNoiseReduction: false,
   enableHumRemoval: false,
   pureQSJ: false,
 };
