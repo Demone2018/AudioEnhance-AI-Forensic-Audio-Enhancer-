@@ -121,40 +121,40 @@ function App() {
     }
   }, [processor.result, audioCtx]);
 
-  const handlePlayOriginal = useCallback(() => {
+  // Use simple functions instead of useCallback to avoid stale closures
+  const handlePlayOriginal = () => {
     if (!originalBuffer) return;
-    if (playingSource === 'original') {
+    if (audioCtx.isPlaying) {
       audioCtx.stopPlayback();
-      return;
+      if (audioCtx.playingSource === 'original') return;
     }
     audioCtx.playRawBuffer(originalBuffer);
-  }, [originalBuffer, audioCtx, playingSource]);
+  };
 
-  const handlePlayProcessed = useCallback(() => {
+  const handlePlayProcessed = () => {
     if (!processedBuffer) return;
-    if (playingSource === 'processed') {
+    if (audioCtx.isPlaying) {
       audioCtx.stopPlayback();
-      return;
+      if (audioCtx.playingSource === 'processed') return;
     }
     audioCtx.playBuffer(processedBuffer, processor.params);
-  }, [processedBuffer, processor.params, audioCtx, playingSource]);
+  };
+
+  // Stop anything that's playing
+  const handleStop = () => {
+    audioCtx.stopPlayback();
+  };
 
   // Seek on waveform click: start playing from that position
-  const handleSeekOriginal = useCallback(
-    (time: number) => {
-      if (!originalBuffer) return;
-      audioCtx.playRawFrom(originalBuffer, time);
-    },
-    [originalBuffer, audioCtx]
-  );
+  const handleSeekOriginal = (time: number) => {
+    if (!originalBuffer) return;
+    audioCtx.playRawFrom(originalBuffer, time);
+  };
 
-  const handleSeekProcessed = useCallback(
-    (time: number) => {
-      if (!processedBuffer) return;
-      audioCtx.playFilteredFrom(processedBuffer, processor.params, time);
-    },
-    [processedBuffer, processor.params, audioCtx]
-  );
+  const handleSeekProcessed = (time: number) => {
+    if (!processedBuffer) return;
+    audioCtx.playFilteredFrom(processedBuffer, processor.params, time);
+  };
 
   const handleDownload = useCallback(async () => {
     if (!processor.result) return;
@@ -294,30 +294,43 @@ function App() {
               </AnimatePresence>
 
               {originalData && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={handlePlayOriginal}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm transition-colors ${
-                      playingSource === 'original'
-                        ? 'bg-green-600 text-white'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                    }`}
-                  >
-                    {playingSource === 'original' ? <Square size={14} /> : <Play size={14} />}
-                    {t('playOriginal', lang)}
-                  </button>
-
-                  {processor.result && (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
                     <button
-                      onClick={handlePlayProcessed}
+                      onClick={handlePlayOriginal}
                       className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm transition-colors ${
-                        playingSource === 'processed'
+                        playingSource === 'original'
                           ? 'bg-green-600 text-white'
                           : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                       }`}
                     >
-                      {playingSource === 'processed' ? <Square size={14} /> : <Play size={14} />}
-                      {t('playProcessed', lang)}
+                      {playingSource === 'original' ? <Square size={14} /> : <Play size={14} />}
+                      {t('playOriginal', lang)}
+                    </button>
+
+                    {processor.result && (
+                      <button
+                        onClick={handlePlayProcessed}
+                        className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm transition-colors ${
+                          playingSource === 'processed'
+                            ? 'bg-green-600 text-white'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {playingSource === 'processed' ? <Square size={14} /> : <Play size={14} />}
+                        {t('playProcessed', lang)}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Always-visible Stop button when playing */}
+                  {audioCtx.isPlaying && (
+                    <button
+                      onClick={handleStop}
+                      className="w-full flex items-center justify-center gap-2 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    >
+                      <Square size={14} />
+                      {t('stopBtn', lang)}
                     </button>
                   )}
                 </div>

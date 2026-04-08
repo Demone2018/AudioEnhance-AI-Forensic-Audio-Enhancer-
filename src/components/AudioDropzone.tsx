@@ -22,15 +22,29 @@ export function AudioDropzone({
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadedFile, setLoadedFile] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = useCallback(
     async (file: File) => {
       setIsLoading(true);
+      setLoadError(null);
       try {
         const arrayBuffer = await file.arrayBuffer();
 
-        // Check for AMR format
+        // Always try browser's native decoding first (supports WAV, MP3, OGG, FLAC, AAC, etc.)
+        // Some browsers can also decode AMR natively
+        try {
+          const audioBuffer = await decodeAudioData(arrayBuffer.slice(0));
+          onFileLoaded(audioBuffer, file.name, arrayBuffer);
+          setLoadedFile(file.name);
+          setIsLoading(false);
+          return;
+        } catch {
+          // Browser can't decode this format - check if it's AMR
+        }
+
+        // Fallback for AMR files: use worker-based conversion
         const header = new Uint8Array(arrayBuffer.slice(0, 6));
         const headerStr = String.fromCharCode(...header);
         if (headerStr.startsWith('#!AMR') || file.name.toLowerCase().endsWith('.amr')) {
@@ -40,15 +54,16 @@ export function AudioDropzone({
           return;
         }
 
-        const audioBuffer = await decodeAudioData(arrayBuffer.slice(0));
-        onFileLoaded(audioBuffer, file.name, arrayBuffer);
-        setLoadedFile(file.name);
+        setLoadError(lang === 'it'
+          ? 'Formato audio non supportato dal browser.'
+          : 'Audio format not supported by this browser.');
       } catch (err) {
         console.error('Failed to load audio file:', err);
+        setLoadError(lang === 'it' ? 'Errore nel caricamento del file.' : 'Error loading file.');
       }
       setIsLoading(false);
     },
-    [onFileLoaded, onAmrDetected, decodeAudioData]
+    [onFileLoaded, onAmrDetected, decodeAudioData, lang]
   );
 
   const onDrop = useCallback(
@@ -138,6 +153,10 @@ export function AudioDropzone({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {loadError && (
+        <p className="text-xs text-red-400 mt-2 text-center">{loadError}</p>
+      )}
     </div>
   );
 }
