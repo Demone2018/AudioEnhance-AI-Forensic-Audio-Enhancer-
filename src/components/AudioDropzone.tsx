@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { Upload, FileAudio, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import audioDecode from 'audio-decode';
 import type { Language } from '../types/audio';
 import { t } from '../i18n/translations';
 
 interface AudioDropzoneProps {
   onFileLoaded: (audioBuffer: AudioBuffer, fileName: string, rawArrayBuffer: ArrayBuffer) => void;
-  onAmrDetected: (arrayBuffer: ArrayBuffer, fileName: string) => void;
   decodeAudioData: (buffer: ArrayBuffer) => Promise<AudioBuffer>;
   lang: Language;
   disabled: boolean;
@@ -14,7 +14,6 @@ interface AudioDropzoneProps {
 
 export function AudioDropzone({
   onFileLoaded,
-  onAmrDetected,
   decodeAudioData,
   lang,
   disabled,
@@ -32,8 +31,34 @@ export function AudioDropzone({
       try {
         const arrayBuffer = await file.arrayBuffer();
 
-        // Always try browser's native decoding first (supports WAV, MP3, OGG, FLAC, AAC, etc.)
-        // Some browsers can also decode AMR natively
+        // Check if this is an AMR file (or other format the browser can't handle)
+        const isAmr = file.name.toLowerCase().endsWith('.amr') ||
+          (() => {
+            const header = new Uint8Array(arrayBuffer.slice(0, 6));
+            return String.fromCharCode(...header).startsWith('#!AMR');
+          })();
+
+        if (isAmr) {
+          // Use audio-decode library which has a software AMR decoder
+          const decoded = await audioDecode(arrayBuffer.slice(0));
+          // audio-decode returns { channelData: Float32Array[], sampleRate }
+          const ctx = new AudioContext();
+          const realBuffer = ctx.createBuffer(
+            decoded.channelData.length,
+            decoded.channelData[0].length,
+            decoded.sampleRate
+          );
+          for (let ch = 0; ch < decoded.channelData.length; ch++) {
+            realBuffer.copyToChannel(new Float32Array(decoded.channelData[ch]), ch);
+          }
+          await ctx.close();
+          onFileLoaded(realBuffer, file.name, arrayBuffer);
+          setLoadedFile(file.name);
+          setIsLoading(false);
+          return;
+        }
+
+        // For standard formats, use browser's native Web Audio API decoder
         try {
           const audioBuffer = await decodeAudioData(arrayBuffer.slice(0));
           onFileLoaded(audioBuffer, file.name, arrayBuffer);
@@ -41,29 +66,40 @@ export function AudioDropzone({
           setIsLoading(false);
           return;
         } catch {
-          // Browser can't decode this format - check if it's AMR
+          // Browser failed, try audio-decode as universal fallback
         }
 
-        // Fallback for AMR files: use worker-based conversion
-        const header = new Uint8Array(arrayBuffer.slice(0, 6));
-        const headerStr = String.fromCharCode(...header);
-        if (headerStr.startsWith('#!AMR') || file.name.toLowerCase().endsWith('.amr')) {
-          onAmrDetected(arrayBuffer, file.name);
+        // Universal fallback: audio-decode supports many formats
+        try {
+          const dec = await audioDecode(arrayBuffer.slice(0));
+          const ctx2 = new AudioContext();
+          const buf2 = ctx2.createBuffer(
+            dec.channelData.length,
+            dec.channelData[0].length,
+            dec.sampleRate
+          );
+          for (let ch = 0; ch < dec.channelData.length; ch++) {
+            buf2.copyToChannel(new Float32Array(dec.channelData[ch]), ch);
+          }
+          await ctx2.close();
+          onFileLoaded(buf2, file.name, arrayBuffer);
           setLoadedFile(file.name);
           setIsLoading(false);
           return;
+        } catch {
+          // Nothing worked
         }
 
         setLoadError(lang === 'it'
-          ? 'Formato audio non supportato dal browser.'
-          : 'Audio format not supported by this browser.');
+          ? 'Formato audio non supportato.'
+          : 'Audio format not supported.');
       } catch (err) {
         console.error('Failed to load audio file:', err);
         setLoadError(lang === 'it' ? 'Errore nel caricamento del file.' : 'Error loading file.');
       }
       setIsLoading(false);
     },
-    [onFileLoaded, onAmrDetected, decodeAudioData, lang]
+    [onFileLoaded, decodeAudioData, lang]
   );
 
   const onDrop = useCallback(

@@ -73,23 +73,6 @@ function App() {
     [processor, audioCtx]
   );
 
-  const handleAmrDetected = useCallback(
-    async (arrayBuffer: ArrayBuffer, name: string) => {
-      try {
-        const { audioData, sampleRate } = await processor.convertAmr(arrayBuffer);
-        const buffer = audioCtx.createBufferFromFloat32(audioData, sampleRate);
-        setOriginalBuffer(buffer);
-        setOriginalData(new Float32Array(audioData));
-        setFileName(name.replace(/\.amr$/i, '.wav'));
-        processor.resetResult();
-        audioCtx.resetTime();
-      } catch (err) {
-        console.error('AMR conversion failed:', err);
-      }
-    },
-    [processor, audioCtx]
-  );
-
   const handleProcess = useCallback(async () => {
     if (!originalData || !originalBuffer) return;
 
@@ -236,7 +219,6 @@ function App() {
           <div className="lg:col-span-4 space-y-6">
             <AudioDropzone
               onFileLoaded={handleFileLoaded}
-              onAmrDetected={handleAmrDetected}
               decodeAudioData={audioCtx.decodeAudioData}
               lang={lang}
               disabled={processor.isProcessing}
