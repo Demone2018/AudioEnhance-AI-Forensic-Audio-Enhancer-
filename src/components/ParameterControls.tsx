@@ -101,11 +101,12 @@ export function ParameterControls({ params, onUpdate, disabled, lang }: Paramete
         <Slider
           label={t('sensitivity', lang)}
           description={t('sensitivityDesc', lang)}
-          value={params.sensitivity}
-          onChange={(v) => onUpdate('sensitivity', v)}
-          min={0}
-          max={100}
+          value={params.qsjThresholdDb}
+          onChange={(v) => onUpdate('qsjThresholdDb', v)}
+          min={-60}
+          max={0}
           step={1}
+          unit="dB"
           disabled={disabled}
         />
 

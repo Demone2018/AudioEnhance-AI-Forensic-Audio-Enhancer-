@@ -20,8 +20,8 @@ const translations = {
   resetBtn: { it: 'Reset', en: 'Reset' },
 
   // Parameters
-  sensitivity: { it: 'Sensibilità QSJ', en: 'QSJ Sensitivity' },
-  sensitivityDesc: { it: 'Soglia per il taglio dei segmenti rumorosi (0-100)', en: 'Threshold for cutting noisy segments (0-100)' },
+  sensitivity: { it: 'Soglia Taglio QSJ', en: 'QSJ Cut Threshold' },
+  sensitivityDesc: { it: 'I segmenti con picco sopra questa soglia vengono tagliati (-60dB=quasi tutto, 0dB=niente)', en: 'Segments with peak above this threshold are cut (-60dB=almost all, 0dB=none)' },
   gain: { it: 'Guadagno (dB)', en: 'Gain (dB)' },
   trebleBoost: { it: 'Boost Intelligibilità (dB)', en: 'Intelligibility Boost (dB)' },
   trebleBoostDesc: { it: 'Enfatizza consonanti e chiarezza vocale a 3500Hz', en: 'Emphasize consonants and vocal clarity at 3500Hz' },

@@ -14,10 +14,11 @@ function sendProgress(progress: number, message: string) {
 function applyQSJ(
   data: Float32Array,
   sampleRate: number,
-  sensitivity: number
+  thresholdDb: number
 ): { output: Float32Array; segments: Array<{ start: number; end: number; kept: boolean }> } {
   const windowSize = Math.floor(sampleRate * 0.02); // 20ms windows
-  const threshold = sensitivity / 100;
+  // Convert dB to linear amplitude: -32dB = 0.025, -20dB = 0.1, -6dB = 0.5
+  const threshold = Math.pow(10, thresholdDb / 20);
   const segments: Array<{ start: number; end: number; kept: boolean }> = [];
   const keptChunks: Float32Array[] = [];
 
@@ -269,8 +270,8 @@ function buildMetadata(params: ProcessingParams): { suffix: string; metadata: st
   const parts: string[] = [];
   const metaParts: string[] = [];
 
-  parts.push(`S${params.sensitivity}`);
-  metaParts.push(`Sensitivity: ${params.sensitivity}`);
+  parts.push(`S${params.qsjThresholdDb}`);
+  metaParts.push(`QSJ Threshold: ${params.qsjThresholdDb}dB`);
 
   parts.push(`G${params.gainDb}`);
   metaParts.push(`Gain: ${params.gainDb}dB`);
@@ -321,7 +322,7 @@ function processAudio(audioData: Float32Array, sampleRate: number, params: Proce
   // Step 1: QSJ if enabled
   if (params.enableQSJ) {
     sendProgress(15, 'Applying Quiet Segment Joiner...');
-    const qsjResult = applyQSJ(data, sampleRate, params.sensitivity);
+    const qsjResult = applyQSJ(data, sampleRate, params.qsjThresholdDb);
     data = qsjResult.output;
     qsjSegments = qsjResult.segments;
 

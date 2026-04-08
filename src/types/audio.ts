@@ -1,5 +1,6 @@
 export interface ProcessingParams {
-  sensitivity: number;       // QSJ threshold 0-100
+  sensitivity: number;       // QSJ threshold 0-100 (legacy)
+  qsjThresholdDb: number;    // QSJ cut threshold in dB (e.g. -32)
   gainDb: number;            // output gain in dB
   trebleBoost: number;       // treble/consonant boost in dB
   enableEQ: boolean;         // voice isolation filters

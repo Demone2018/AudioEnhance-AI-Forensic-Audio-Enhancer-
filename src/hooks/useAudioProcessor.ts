@@ -3,6 +3,7 @@ import type { ProcessingParams, ProcessingResult, WorkerResponse } from '../type
 
 const DEFAULT_PARAMS: ProcessingParams = {
   sensitivity: 50,
+  qsjThresholdDb: -32,
   gainDb: 3,
   trebleBoost: 3,
   enableEQ: false,
